@@ -32,6 +32,7 @@ import me.ash.reader.domain.model.account.AccountType
 import me.ash.reader.domain.model.account.AccountType.Companion.FreshRSS
 import me.ash.reader.domain.model.account.security.GoogleReaderSecurityKey
 import me.ash.reader.domain.model.article.Article
+import me.ash.reader.domain.model.article.shouldBlock
 import me.ash.reader.domain.model.feed.Feed
 import me.ash.reader.domain.model.group.Group
 import me.ash.reader.domain.repository.ArticleDao
@@ -474,9 +475,13 @@ constructor(
                         whileSelect {
                             for (deferred in deferredList) {
                                 deferred.onAwait {
-                                    articleDao.insertList(it)
+                                    val newArticles =
+                                        it.filterNot { article ->
+                                            account.syncBlockList.shouldBlock(article.title)
+                                        }
+                                    articleDao.insertList(newArticles)
                                     articlesToNotify.addAll(
-                                        it.fastFilter {
+                                        newArticles.fastFilter {
                                             it.isUnread && notificationFeedIds.contains(it.feedId)
                                         }
                                     )
@@ -598,6 +603,7 @@ constructor(
                     unreadIds = remoteUnreadIds.await(),
                     starredIds = remoteStarredIds.await(),
                 )
+                    .filterNot { account.syncBlockList.shouldBlock(it.title) }
 
             if (feed.isNotification) {
                 val articlesToNotify = items.fastFilter { it.isUnread }

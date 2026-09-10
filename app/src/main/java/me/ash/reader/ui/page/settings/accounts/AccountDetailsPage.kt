@@ -230,10 +230,18 @@ fun AccountDetailsPage(
                         desc = selectedAccount?.keepArchived?.toDesc(context),
                         onClick = { keepArchivedDialogVisible = true },
                     ) {}
-                    // SettingItem(
-                    //     title = stringResource(R.string.block_list),
-                    //     onClick = { blockListDialogVisible = true },
-                    // ) {}
+                    SettingItem(
+                        title = stringResource(R.string.block_list),
+                        desc = stringResource(R.string.block_list_tips),
+                        onClick = {
+                            blockListValue =
+                                SyncBlockListPreference.toString(
+                                    selectedAccount?.syncBlockList
+                                        ?: SyncBlockListPreference.default
+                                )
+                            blockListDialogVisible = true
+                        },
+                    ) {}
                     Tips(
                         text =
                             stringResource(R.string.synchronous_tips) +
@@ -328,10 +336,12 @@ fun AccountDetailsPage(
         onValueChange = { blockListValue = it },
         onDismissRequest = { blockListDialogVisible = false },
         onConfirm = {
-            selectedAccount?.id?.let {
-                SyncBlockListPreference.put(it, viewModel, selectedAccount.syncBlockList)
+            selectedAccount?.let { account ->
+                val blockList = SyncBlockListPreference.of(blockListValue)
                 blockListDialogVisible = false
-                context.showToast(selectedAccount.syncBlockList.toString())
+                viewModel.applyBlockList(account, blockList) { removed ->
+                    context.showToast(context.getString(R.string.block_list_toast, removed))
+                }
             }
         },
     )

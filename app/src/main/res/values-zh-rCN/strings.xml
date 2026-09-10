@@ -230,6 +230,8 @@
     <string name="only_when_charging">仅限连接充电器时</string>
     <string name="keep_archived_articles">保留已归档的文章</string>
     <string name="block_list">屏蔽列表</string>
+    <string name="block_list_tips">每行一个关键词，命中标题的文章将被跳过</string>
+    <string name="block_list_toast">屏蔽列表已保存，已移除 %1$d 篇文章</string>
     <string name="export_as_opml">导出为 OPML</string>
     <string name="clear_all_articles">清空所有文章</string>
     <string name="delete_account">删除账户</string>

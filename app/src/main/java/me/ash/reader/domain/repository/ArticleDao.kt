@@ -430,6 +430,14 @@ interface ArticleDao {
     )
     suspend fun deleteByAccountId(accountId: Int)
 
+    @Query(
+        """
+        SELECT * FROM article
+        WHERE accountId = :accountId
+        """
+    )
+    suspend fun queryAllByAccountId(accountId: Int): List<Article>
+
 
     @Transaction
     @Query(

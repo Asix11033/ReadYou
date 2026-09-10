@@ -270,6 +270,8 @@
     <string name="only_when_charging">Only when charging</string>
     <string name="keep_archived_articles">Keep archived articles</string>
     <string name="block_list">Block list</string>
+    <string name="block_list_tips">One keyword per line; matching titles are skipped</string>
+    <string name="block_list_toast">Block list saved, %1$d article(s) removed</string>
     <string name="export_as_opml">Export as OPML</string>
     <string name="clear_all_articles">Clear all articles</string>
     <string name="delete_account">Delete account</string>

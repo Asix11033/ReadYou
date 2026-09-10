@@ -16,6 +16,7 @@ import me.ash.reader.domain.model.account.Account
 import me.ash.reader.domain.model.article.ArchivedArticle
 import me.ash.reader.domain.model.article.Article
 import me.ash.reader.domain.model.article.ArticleWithFeed
+import me.ash.reader.domain.model.article.shouldBlock
 import me.ash.reader.domain.model.feed.Feed
 import me.ash.reader.domain.model.group.Group
 import me.ash.reader.domain.model.group.GroupWithFeed
@@ -24,6 +25,8 @@ import me.ash.reader.domain.repository.FeedDao
 import me.ash.reader.domain.repository.GroupDao
 import me.ash.reader.infrastructure.android.NotificationHelper
 import me.ash.reader.infrastructure.preference.KeepArchivedPreference
+import me.ash.reader.infrastructure.preference.SyncBlockList
+import me.ash.reader.infrastructure.preference.SyncBlockListPreference
 import me.ash.reader.infrastructure.preference.SyncIntervalPreference
 import me.ash.reader.infrastructure.rss.RssHelper
 import me.ash.reader.ui.ext.decodeHTML
@@ -74,8 +77,12 @@ abstract class AbstractRssRepository(
             )
         val articles =
             searchedFeed.entries.map { rssHelper.buildArticleFromSyndEntry(feed, accountId, it) }
+        val blockList = accountService.getAccountById(accountId)?.syncBlockList
+            ?: SyncBlockListPreference.default
         feedDao.insert(feed)
-        articleDao.insertList(articles.map { it.copy(feedId = feed.id) })
+        articleDao.insertList(
+            articles.map { it.copy(feedId = feed.id) }.filterNot { blockList.shouldBlock(it.title) }
+        )
     }
 
     open suspend fun addGroup(destFeed: Feed?, newGroupName: String): String {
@@ -380,6 +387,22 @@ abstract class AbstractRssRepository(
 
     suspend fun deleteAccountArticles(accountId: Int) {
         articleDao.deleteByAccountId(accountId)
+    }
+
+    /**
+     * Applies [blockList] to the articles that are already stored, and returns how many
+     * of them have been removed.
+     *
+     * The matching is done in Kotlin with the very same [shouldBlock] used at sync time, so
+     * the result is guaranteed to be consistent with newly fetched articles, and no user
+     * input ever reaches SQL.
+     */
+    suspend fun applyBlockList(accountId: Int, blockList: SyncBlockList): Int {
+        if (blockList.isEmpty()) return 0
+        val blocked = articleDao.queryAllByAccountId(accountId).filter { blockList.shouldBlock(it.title) }
+        if (blocked.isEmpty()) return 0
+        articleDao.delete(*blocked.toTypedArray())
+        return blocked.size
     }
 
     suspend fun groupParseFullContent(group: Group, isFullContent: Boolean) {
