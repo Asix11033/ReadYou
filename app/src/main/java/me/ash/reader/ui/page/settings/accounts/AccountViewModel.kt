@@ -22,6 +22,7 @@ import me.ash.reader.infrastructure.di.ApplicationScope
 import me.ash.reader.infrastructure.di.DefaultDispatcher
 import me.ash.reader.infrastructure.di.IODispatcher
 import me.ash.reader.infrastructure.di.MainDispatcher
+import me.ash.reader.infrastructure.preference.SyncBlockList
 import javax.inject.Inject
 
 @HiltViewModel
@@ -95,6 +96,19 @@ class AccountViewModel @Inject constructor(
             withContext(mainDispatcher) {
                 callback()
             }
+        }
+    }
+
+    /**
+     * Persists [blockList] on [account] and immediately removes the already stored articles
+     * that match it. [callback] receives the number of removed articles on the main thread.
+     */
+    fun applyBlockList(account: Account, blockList: SyncBlockList, callback: (Int) -> Unit = {}) {
+        val accountId = account.id ?: return
+        viewModelScope.launch(ioDispatcher) {
+            accountService.update(accountId) { copy(syncBlockList = blockList) }
+            val removed = rssService.get(account.type.id).applyBlockList(accountId, blockList)
+            withContext(mainDispatcher) { callback(removed) }
         }
     }
 

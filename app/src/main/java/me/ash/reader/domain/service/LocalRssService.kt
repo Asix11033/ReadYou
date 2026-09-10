@@ -15,6 +15,7 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import me.ash.reader.domain.data.SyncLogger
 import me.ash.reader.domain.model.account.AccountType
+import me.ash.reader.domain.model.article.shouldBlock
 import me.ash.reader.domain.model.feed.Feed
 import me.ash.reader.domain.model.feed.FeedWithArticle
 import me.ash.reader.domain.repository.ArticleDao
@@ -87,9 +88,9 @@ constructor(
                                     .toSet()
                             val fetchedFeed = syncFeed(currentFeed, preDate)
                             val fetchedArticles =
-                                fetchedFeed.articles.filterNot {
-                                    archivedArticles.contains(it.link)
-                                }
+                                fetchedFeed.articles
+                                    .filterNot { archivedArticles.contains(it.link) }
+                                    .filterNot { currentAccount.syncBlockList.shouldBlock(it.title) }
 
                             val newArticles =
                                 articleDao.insertListIfNotExist(

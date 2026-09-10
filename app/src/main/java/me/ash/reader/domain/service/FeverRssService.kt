@@ -19,6 +19,7 @@ import me.ash.reader.domain.model.account.AccountType
 import me.ash.reader.domain.model.account.security.FeverSecurityKey
 import me.ash.reader.domain.model.article.Article
 import me.ash.reader.domain.model.article.ArticleMeta
+import me.ash.reader.domain.model.article.shouldBlock
 import me.ash.reader.domain.model.feed.Feed
 import me.ash.reader.domain.model.group.Group
 import me.ash.reader.domain.repository.ArticleDao
@@ -250,7 +251,11 @@ constructor(
                         )
                     }
 
-                allArticles.addAll(articlesFromBatch)
+                allArticles.addAll(
+                    articlesFromBatch.filterNot {
+                        account.syncBlockList.shouldBlock(it.title)
+                    }
+                )
 
                 lastSeenId = fetchedItems.lastOrNull()?.id ?: break
 
