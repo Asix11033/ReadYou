@@ -31,10 +31,9 @@ class ReadingRememberPositionPreference(val value: Boolean) : Preference() {
     companion object {
         val default = ReadingRememberPositionPreference(true)
 
-        fun fromPreferences(preference: Preferences): ReadingRememberPositionPreference =
-            ReadingRememberPositionPreference(
-                preference[DataStoreKey.keys[readingRememberPosition]?.key as Preferences.Key<Boolean>]
-                    ?: return default
-            )
+        fun fromPreferences(preference: Preferences): ReadingRememberPositionPreference {
+            val key = DataStoreKey.keys[readingRememberPosition]?.key as Preferences.Key<Boolean>
+            return ReadingRememberPositionPreference(preference[key] ?: default.value)
+        }
     }
 }
