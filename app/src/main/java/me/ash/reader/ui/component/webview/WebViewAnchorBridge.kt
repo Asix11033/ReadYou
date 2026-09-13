@@ -2,6 +2,7 @@ package me.ash.reader.ui.component.webview
 
 import android.webkit.WebView
 import kotlin.coroutines.resume
+import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
@@ -14,6 +15,16 @@ import org.json.JSONArray
  * **WebView 自身不滚动**，所以 `element.scrollIntoView()` 没有任何视觉效果。可行路径是
  * `getElementById(id)` 取到元素相对文档顶部的像素值，再由 Kotlin 侧换算成 `scrollState` 的
  * 目标偏移（换算与补偿在 `WebViewAnchorResolver` 里）。
+ *
+ * ## 坐标系（**必读**：这里曾经是「目录跳转整体偏早」的根因）
+ *
+ * `getBoundingClientRect()` / `offsetTop` 返回的是 **CSS px**，而 Compose 的
+ * `ScrollState.value` / `ScrollState.maxValue` 是 **物理 px**。ReadYou 的正文 WebView 以
+ * `initial-scale=1, width=device-width` 布局，因此 **1 CSS px = `density` 个物理 px**。
+ * 直接把 CSS px 当物理 px 用，误差与「离文档顶部的距离」成正比 ——
+ * 第一项（`overview`，偏移≈0）看起来完全正确，其余项全部**落点偏早**（约差一个 density 倍率）。
+ *
+ * 本文件对外的所有偏移量**统一换算成物理 px**，调用方不需要知道 CSS px 的存在。
  *
  * 精度：`offsetTop` 在图片异步加载完成前偏小（图片撑高会把锚点往下推），因此查询前先等
  * 「元素出现 + 图片加载完成」，并设总超时兜底——超时也不会失败，只是给出当前的最优值。
@@ -28,8 +39,46 @@ private const val POLL_INTERVAL_MS = 50L
 /** id 只允许出现在单引号字符串里；非法字符直接拒绝，避免注入。 */
 private val safeAnchorId = Regex("[A-Za-z0-9_-]+")
 
+/** 取元素相对文档顶部的偏移（CSS px）；元素不存在返回 `null`。 */
+private suspend fun WebView.elementOffsetCss(id: String): Int? {
+    val value =
+        evaluateJavascriptSync(
+            "(function(){var e=document.getElementById('$id');if(!e)return null;" +
+                "var r=e.getBoundingClientRect();return Math.round(r.top+window.scrollY);})()"
+        )
+    return value?.trim('"')?.toIntOrNull()
+}
+
+/** 文档总高度（CSS px）。 */
+private suspend fun WebView.scrollHeightCss(): Int? =
+    evaluateJavascriptSync("Math.round(document.documentElement.scrollHeight)")
+        ?.trim('"')
+        ?.toIntOrNull()
+
 /**
- * 取元素相对文档顶部的像素偏移（含 `window.scrollY` 补偿）。
+ * CSS px → 物理 px 的换算系数。
+ *
+ * 优先用「WebView 实测高度 ÷ 文档 CSS 高度」反算（自校准，对任何非 1 的页面缩放同样成立）；
+ * 反算不可用（View 尚未布局 / 文档为空）或明显失真时退回 `density`。
+ *
+ * 该值只依赖渲染结果，与滚动位置无关，因此每次查询重新取一次即可，无需缓存。
+ */
+suspend fun WebView.documentScalePx(): Float {
+    val density = resources.displayMetrics.density
+    val docHeight = scrollHeightCss() ?: return density
+    val viewHeight = height
+    if (docHeight <= 0 || viewHeight <= 0) return density
+    val derived = viewHeight.toFloat() / docHeight
+    // 只接受落在 density 附近的推导值：偏差过大说明布局还没完成，用 density 更稳
+    return if (derived.isFinite() && derived > density * 0.5f && derived < density * 1.5f) {
+        derived
+    } else {
+        density
+    }
+}
+
+/**
+ * 取元素相对文档顶部的像素偏移（**物理 px**，可直接与 `ScrollState.value` 相加）。
  *
  * @return 偏移值；元素不存在或超时返回 `null`。
  */
@@ -41,34 +90,32 @@ suspend fun WebView.anchorOffsetTop(id: String, timeoutMillis: Long = ANCHOR_QUE
     }
     awaitImagesLoaded(timeoutMillis)
 
-    val value =
-        evaluateJavascriptSync(
-            "(function(){var e=document.getElementById('$sanitized');if(!e)return null;" +
-                "var r=e.getBoundingClientRect();return Math.round(r.top+window.scrollY);})()"
-        )
-    return value?.trim('"')?.toIntOrNull()
+    val scale = documentScalePx()
+    val css = elementOffsetCss(sanitized) ?: return null
+    return (css * scale).roundToInt()
 }
 
-/** 立即取元素偏移，不做等待与图片补偿。用于恢复时的漂移校正。 */
+/** 立即取元素偏移（**物理 px**），不做等待与图片补偿。用于恢复时的漂移校正。 */
 suspend fun WebView.elementOffsetTop(id: String): Int? {
     val sanitized = id.takeIf { safeAnchorId.matches(it) } ?: return null
-    val value =
-        evaluateJavascriptSync(
-            "(function(){var e=document.getElementById('$sanitized');if(!e)return null;" +
-                "var r=e.getBoundingClientRect();return Math.round(r.top+window.scrollY);})()"
-        )
-    return value?.trim('"')?.toIntOrNull()
+    val scale = documentScalePx()
+    val css = elementOffsetCss(sanitized) ?: return null
+    return (css * scale).roundToInt()
 }
 
 /**
  * 找出文档中「起始位置不晚于 [documentY] 的最后一个带 id 元素」。
  *
- * @return `id to 文档内偏移`；找不到返回 `null`。
+ * @param documentY 视口顶部在**文档内的物理 px 偏移**（与 `ScrollState.value` 同一坐标系，
+ *   内部会换算成 CSS px 后再交给 JS 比较）。
+ * @return `id to 文档内物理 px 偏移`；找不到返回 `null`。
  */
 suspend fun WebView.anchorAt(documentY: Int): Pair<String, Int>? {
+    val scale = documentScalePx()
+    val y = (documentY / scale).roundToInt()
     val value =
         evaluateJavascriptSync(
-            "(function(){var y=$documentY,best=null,bestTop=-1;" +
+            "(function(){var y=$y,best=null,bestTop=-1;" +
                 "var all=document.querySelectorAll('[id]');" +
                 "for(var i=0;i<all.length;i++){" +
                 "var t=all[i].getBoundingClientRect().top+window.scrollY;" +
@@ -78,7 +125,7 @@ suspend fun WebView.anchorAt(documentY: Int): Pair<String, Int>? {
     if (value.isBlank() || value == "null") return null
     return runCatching {
             val array = JSONArray(value)
-            array.getString(0) to array.getInt(1)
+            array.getString(0) to (array.getInt(1) * scale).roundToInt()
         }
         .getOrNull()
 }

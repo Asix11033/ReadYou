@@ -44,16 +44,21 @@ import androidx.compose.ui.unit.isSpecified
 import androidx.compose.ui.unit.sp
 import kotlin.math.abs
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.ash.reader.R
+import me.ash.reader.domain.model.article.ReadingPosition
 import me.ash.reader.infrastructure.android.TextToSpeechManager
 import me.ash.reader.infrastructure.preference.LocalPullToSwitchArticle
 import me.ash.reader.infrastructure.preference.LocalReadingAutoHideToolbar
 import me.ash.reader.infrastructure.preference.LocalReadingBoldCharacters
+import me.ash.reader.infrastructure.preference.LocalReadingRememberPosition
 import me.ash.reader.infrastructure.preference.LocalReadingRenderer
 import me.ash.reader.infrastructure.preference.LocalReadingTextLineHeight
+import me.ash.reader.infrastructure.preference.ReadingRendererPreference
 import me.ash.reader.infrastructure.preference.not
 import me.ash.reader.ui.ext.collectAsStateValue
 import me.ash.reader.ui.ext.showToast
@@ -64,6 +69,62 @@ import me.ash.reader.ui.page.home.reading.tts.TtsButton
 
 private const val UPWARD = 1
 private const val DOWNWARD = -1
+
+/** 阅读位置捕获的去抖时长：滚动停止约 0.8s 后才落盘，避免高频写库。 */
+private const val POSITION_CAPTURE_DEBOUNCE_MS = 800L
+
+/** 像素偏移小于该值时视为「仍在顶部」，不写位置记录。 */
+private const val POSITION_AT_TOP_PX = 8
+
+/** 当前渲染器对应的位置记录模式。 */
+private fun ReadingRendererPreference.positionMode(): Int =
+    when (this) {
+        ReadingRendererPreference.WebView -> ReadingPosition.MODE_WEBVIEW
+        ReadingRendererPreference.NativeComponent -> ReadingPosition.MODE_NATIVE
+    }
+
+/** 把锚点落成一条可持久化的位置记录（`accountId` / `updatedAt` 由 ViewModel 统一填充）。 */
+private fun Anchor.toReadingPosition(articleId: String, mode: Int, content: String) =
+    ReadingPosition(
+        articleId = articleId,
+        accountId = -1,
+        mode = mode,
+        index = itemIndex,
+        offset = offset,
+        anchorId = id,
+        anchorOffset = anchorOffset,
+        ratio = ratio,
+        contentLength = content.length,
+        contentHash = content.hashCode(),
+        updatedAt = 0L,
+    )
+
+/**
+ * 把位置记录还原成可跳转的锚点。
+ *
+ * 三种情况：
+ * 1. 渲染器一致 + 内容指纹一致 → 精确恢复（像素/项序号 + 锚点漂移补偿）；
+ * 2. 用户换过渲染器 → 像素与项序号互不可用，退化为比例落位；
+ * 3. 渲染器一致但内容变了（摘要 ↔ 全文）→ **不猜**，从头开始。
+ */
+private fun ReadingPosition.toAnchorOrNull(currentMode: Int, content: String): Anchor? {
+    val sameContent = contentLength == content.length && contentHash == content.hashCode()
+    return when {
+        mode == currentMode && sameContent ->
+            Anchor(
+                id = anchorId,
+                itemIndex = index,
+                offset = offset,
+                ratio = ratio,
+                anchorOffset = anchorOffset,
+            )
+
+        mode != currentMode && ratio in 0.02f..0.97f ->
+            Anchor(id = anchorId, itemIndex = -1, offset = 0, ratio = ratio, anchorOffset = -1)
+
+        else -> null
+    }
+}
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterialApi::class)
 @Composable
@@ -83,6 +144,7 @@ fun ReadingPage(
     val boldCharacters = LocalReadingBoldCharacters.current
     val coroutineScope = rememberCoroutineScope()
     val renderer = LocalReadingRenderer.current
+    val rememberPositionEnabled = LocalReadingRememberPosition.current.value
 
     var isReaderScrollingDown by remember { mutableStateOf(false) }
     var showFullScreenImageViewer by remember { mutableStateOf(false) }
@@ -114,6 +176,15 @@ fun ReadingPage(
 
     /** 滚动意图：程序化滚动窗口内不写入阅读位置记忆（P4 的唯一消费者）。 */
     var scrollIntent by remember { mutableStateOf(ScrollIntent.Idle) }
+
+    /**
+     * 「本篇已做过位置恢复」标记。
+     *
+     * 用 `remember(articleId)` 而不是在 effect 里清零：key 变化时状态在**组合期**就地重建，
+     * 不依赖两个 LaunchedEffect 的执行先后顺序（后者在 AnimatedContent 的子组合里，
+     * 与外层 effect 的先后是不保证的）。
+     */
+    var positionRestored by remember(readerState.articleId) { mutableStateOf(false) }
 
     // ReadingPage 切文章时不销毁 → 所有临时的 remember 状态必须显式绑定 articleId 清除
     LaunchedEffect(readerState.articleId) {
@@ -291,11 +362,72 @@ fun ReadingPage(
                                     anchorBridge.attach(scrollState, listState)
                                 }
 
+                                // ---------- P4 · 阅读位置记忆：恢复 ----------
+                                // 时序要求：内容已落地（不再是 Loading）+ 滚动容器与 WebView 都已上桥。
+                                // 每篇文章只做一次；恢复属于程序化滚动，因此不会反过来被记进记忆。
+                                LaunchedEffect(articleId, content) {
+                                    if (!rememberPositionEnabled) return@LaunchedEffect
+                                    if (content is ReaderState.Loading) return@LaunchedEffect
+                                    val id = articleId ?: return@LaunchedEffect
+                                    if (positionRestored) return@LaunchedEffect
+                                    val text = content.text.orEmpty()
+                                    if (text.isBlank()) return@LaunchedEffect
+                                    val anchor =
+                                        viewModel
+                                            .loadReadingPosition(id)
+                                            ?.toAnchorOrNull(renderer.positionMode(), text)
+                                            ?: return@LaunchedEffect
+                                    positionRestored = true
+                                    launchProgrammaticScroll {
+                                        anchorBridge.awaitResolver()?.restore(anchor)
+                                    }
+                                }
+
+                                // ---------- P4 · 阅读位置记忆：捕获 ----------
+                                // 去抖落盘：滚动停止约 0.8s 后写一次；程序化滚动期间一律跳过。
+                                LaunchedEffect(articleId, content, renderer, rememberPositionEnabled) {
+                                    if (!rememberPositionEnabled) return@LaunchedEffect
+                                    if (content is ReaderState.Loading) return@LaunchedEffect
+                                    val id = articleId ?: return@LaunchedEffect
+                                    val text = content.text.orEmpty()
+                                    if (text.isBlank()) return@LaunchedEffect
+                                    val mode = renderer.positionMode()
+                                    snapshotFlow {
+                                            if (renderer == ReadingRendererPreference.WebView) {
+                                                scrollState.value to 0
+                                            } else {
+                                                listState.firstVisibleItemIndex to
+                                                    listState.firstVisibleItemScrollOffset
+                                            }
+                                        }
+                                        .debounce(POSITION_CAPTURE_DEBOUNCE_MS)
+                                        .collect {
+                                            // 程序化滚动窗口内不写记忆：否则「目录跳到生词表 →
+                                            // 退出 → 重开」会直接落在生词表
+                                            if (scrollIntent != ScrollIntent.Idle) return@collect
+                                            val anchor =
+                                                anchorBridge.resolver()?.captureCurrent()
+                                                    ?: return@collect
+                                            val position = anchor.toReadingPosition(id, mode, text)
+                                            when {
+                                                // 已读到末尾：清空记录，下次从头开始
+                                                position.ratio >
+                                                    ReadingPosition.READ_COMPLETED_RATIO ->
+                                                    viewModel.clearReadingPosition(id)
+                                                // 仍在顶部：不写（也**不删**，避免与恢复竞争）
+                                                anchor.offset < POSITION_AT_TOP_PX &&
+                                                    anchor.itemIndex <= 0 -> Unit
+                                                else -> viewModel.saveReadingPosition(position)
+                                            }
+                                        }
+                                }
+
                                 LaunchedEffect(bringToTop) {
                                     if (bringToTop) {
-                                        // 点顶栏回顶：视为放弃原上下文 → 清空返回点；
+                                        // 点顶栏回顶：视为放弃原上下文 → 清空返回点与阅读位置记忆；
                                         // 长距离同样走阈值化跳转（瞬时），不再用十几屏的高速动画
                                         returnPoint = null
+                                        articleId?.let { viewModel.clearReadingPosition(it) }
                                         launchProgrammaticScroll {
                                             val resolver = anchorBridge.resolver()
                                             when {

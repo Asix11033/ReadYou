@@ -165,6 +165,7 @@ sealed interface PreferencesKey {
         // Reading page
         const val readingRenderer = "readingRender"
         const val readingBoldCharacters = "readingBoldCharacters"
+        const val readingRememberPosition = "readingRememberPosition"
         const val readingPageTonalElevation = "readingPageTonalElevation"
         const val readingTextFontSize = "readingTextFontSize"
         const val readingTextLineHeight = "readingTextLineHeight"
@@ -242,6 +243,7 @@ sealed interface PreferencesKey {
                 // Reading page
                 IntKey(readingRenderer),
                 BooleanKey(readingBoldCharacters),
+                BooleanKey(readingRememberPosition),
                 IntKey(readingPageTonalElevation),
                 IntKey(readingTextFontSize),
                 FloatKey(readingTextLineHeight),
@@ -327,6 +329,7 @@ data class DataStoreKey<T>(val key: Preferences.Key<T>, val type: Class<T>) {
         // Reading page
         const val readingRenderer = "readingRender"
         const val readingBoldCharacters = "readingBoldCharacters"
+        const val readingRememberPosition = "readingRememberPosition"
         const val readingPageTonalElevation = "readingPageTonalElevation"
         const val readingTextFontSize = "readingTextFontSize"
         const val readingTextLineHeight = "readingTextLineHeight"
@@ -448,6 +451,11 @@ data class DataStoreKey<T>(val key: Preferences.Key<T>, val type: Class<T>) {
                     DataStoreKey(intPreferencesKey(readingRenderer), Int::class.java),
                 readingBoldCharacters to
                     DataStoreKey(booleanPreferencesKey(readingBoldCharacters), Boolean::class.java),
+                readingRememberPosition to
+                    DataStoreKey(
+                        booleanPreferencesKey(readingRememberPosition),
+                        Boolean::class.java,
+                    ),
                 readingPageTonalElevation to
                     DataStoreKey(intPreferencesKey(readingPageTonalElevation), Int::class.java),
                 readingTextFontSize to

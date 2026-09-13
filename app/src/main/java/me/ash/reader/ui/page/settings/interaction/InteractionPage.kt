@@ -32,6 +32,7 @@ import me.ash.reader.infrastructure.preference.LocalMarkAsReadOnScroll
 import me.ash.reader.infrastructure.preference.LocalOpenLink
 import me.ash.reader.infrastructure.preference.LocalOpenLinkSpecificBrowser
 import me.ash.reader.infrastructure.preference.LocalPullToSwitchArticle
+import me.ash.reader.infrastructure.preference.LocalReadingRememberPosition
 import me.ash.reader.infrastructure.preference.LocalSettings
 import me.ash.reader.infrastructure.preference.LocalSharedContent
 import me.ash.reader.infrastructure.preference.LocalSortUnreadArticles
@@ -68,6 +69,7 @@ fun InteractionPage(
     val openLink = LocalOpenLink.current
     val openLinkSpecificBrowser = LocalOpenLinkSpecificBrowser.current
     val sharedContent = LocalSharedContent.current
+    val rememberReadingPosition = LocalReadingRememberPosition.current
     val settings = LocalSettings.current
     val pullToSwitchFeed = settings.pullToSwitchFeed
 
@@ -196,6 +198,14 @@ fun InteractionPage(
                         onClick = { pullToSwitchArticle.toggle(context, scope) }) {
                         RYSwitch(activated = pullToSwitchArticle.value) {
                             pullToSwitchArticle.toggle(context, scope)
+                        }
+                    }
+                    SettingItem(
+                        title = stringResource(id = R.string.remember_reading_position),
+                        desc = stringResource(id = R.string.remember_reading_position_desc),
+                        onClick = { rememberReadingPosition.toggle(context, scope) }) {
+                        RYSwitch(activated = rememberReadingPosition.value) {
+                            rememberReadingPosition.toggle(context, scope)
                         }
                     }
                     Spacer(modifier = Modifier.height(24.dp))

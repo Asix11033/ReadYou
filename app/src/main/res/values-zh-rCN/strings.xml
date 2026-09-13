@@ -353,6 +353,8 @@
     <string name="enable">启用</string>
     <string name="disable">停用</string>
     <string name="toc">目录</string>
+    <string name="remember_reading_position">记住阅读位置</string>
+    <string name="remember_reading_position_desc">再次打开这篇文章时，自动跳回上次读到的地方。</string>
     <string name="back_to_reading">返回阅读处</string>
     <string name="back_to_reading_label">返回「%1$s」</string>
     <string name="reading_returned">已返回阅读处</string>

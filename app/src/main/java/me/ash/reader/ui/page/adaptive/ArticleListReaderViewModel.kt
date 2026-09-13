@@ -8,6 +8,7 @@ import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.util.Date
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import kotlin.collections.any
 import kotlinx.coroutines.CoroutineDispatcher
@@ -24,6 +25,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import me.ash.reader.domain.data.ArticlePagingListUseCase
 import me.ash.reader.domain.data.DiffMapHolder
 import me.ash.reader.domain.data.FilterState
@@ -33,8 +35,10 @@ import me.ash.reader.domain.data.PagerData
 import me.ash.reader.domain.model.article.Article
 import me.ash.reader.domain.model.article.ArticleFlowItem
 import me.ash.reader.domain.model.article.ArticleWithFeed
+import me.ash.reader.domain.model.article.ReadingPosition
 import me.ash.reader.domain.model.feed.Feed
 import me.ash.reader.domain.model.general.MarkAsReadConditions
+import me.ash.reader.domain.repository.ReadingPositionDao
 import me.ash.reader.domain.service.GoogleReaderRssService
 import me.ash.reader.domain.service.LocalRssService
 import me.ash.reader.domain.service.RssService
@@ -66,6 +70,7 @@ constructor(
     val textToSpeechManager: TextToSpeechManager,
     private val imageDownloader: AndroidImageDownloader,
     private val articleListUseCase: ArticlePagingListUseCase,
+    private val readingPositionDao: ReadingPositionDao,
     workManager: WorkManager,
 ) : ViewModel() {
 
@@ -319,6 +324,39 @@ constructor(
     fun clearReadingData() {
         _readingUiState.update { ReadingUiState() }
         _readerState.update { ReaderState() }
+    }
+
+    // ------------------------------------------------------------------
+    // 阅读位置记忆（P4）
+    // ------------------------------------------------------------------
+
+    /** 记录位置时归属的账户 id（仅用于删除账户时联动清理；取不到给 -1）。 */
+    private val currentAccountId: Int
+        get() = readingUiState.value.articleWithFeed?.feed?.accountId ?: -1
+
+    /** 读取该文章上次的阅读位置；没有记录返回 null（调用方直接从头开始）。 */
+    suspend fun loadReadingPosition(articleId: String): ReadingPosition? =
+        withContext(ioDispatcher) { readingPositionDao.queryByArticleId(articleId) }
+
+    /**
+     * 落盘阅读位置。
+     *
+     * `accountId` 与 `updatedAt` 由这里统一填充，调用方只负责位置本身；
+     * 顺带按保留期做一次老化清理（小表，代价可忽略），避免记录无限增长。
+     */
+    fun saveReadingPosition(position: ReadingPosition) {
+        applicationScope.launch(ioDispatcher) {
+            val now = System.currentTimeMillis()
+            readingPositionDao.upsert(position.copy(accountId = currentAccountId, updatedAt = now))
+            readingPositionDao.deleteBefore(
+                now - TimeUnit.DAYS.toMillis(ReadingPosition.RETENTION_DAYS)
+            )
+        }
+    }
+
+    /** 清除某篇文章的阅读位置（读到末尾或回到顶部时调用）。 */
+    fun clearReadingPosition(articleId: String) {
+        applicationScope.launch(ioDispatcher) { readingPositionDao.deleteByArticleId(articleId) }
     }
 
     suspend fun ReaderState.renderContent(articleWithFeed: ArticleWithFeed): ReaderState {

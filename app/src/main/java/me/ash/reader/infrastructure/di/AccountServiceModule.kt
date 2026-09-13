@@ -11,6 +11,7 @@ import me.ash.reader.domain.repository.AccountDao
 import me.ash.reader.domain.repository.ArticleDao
 import me.ash.reader.domain.repository.FeedDao
 import me.ash.reader.domain.repository.GroupDao
+import me.ash.reader.domain.repository.ReadingPositionDao
 import me.ash.reader.domain.service.AccountService
 import me.ash.reader.domain.service.RssService
 import me.ash.reader.infrastructure.preference.SettingsProvider
@@ -27,6 +28,7 @@ object AccountServiceModule {
         groupDao: GroupDao,
         feedDao: FeedDao,
         articleDao: ArticleDao,
+        readingPositionDao: ReadingPositionDao,
         @ApplicationScope coroutineScope: CoroutineScope,
         settingsProvider: SettingsProvider,
     ): AccountService {
@@ -36,6 +38,7 @@ object AccountServiceModule {
             groupDao = groupDao,
             feedDao = feedDao,
             articleDao = articleDao,
+            readingPositionDao = readingPositionDao,
             coroutineScope = coroutineScope,
             settingsProvider = settingsProvider,
         )

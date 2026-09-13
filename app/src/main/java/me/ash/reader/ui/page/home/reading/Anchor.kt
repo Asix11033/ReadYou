@@ -5,9 +5,12 @@ import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.lazy.LazyListState
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import me.ash.reader.infrastructure.preference.ReadingRendererPreference
 import me.ash.reader.ui.component.webview.anchorAt
 import me.ash.reader.ui.component.webview.anchorOffsetTop
+import me.ash.reader.ui.component.webview.awaitImagesLoaded
 import me.ash.reader.ui.component.webview.elementOffsetTop
 
 /**
@@ -83,6 +86,24 @@ private const val FALLBACK_ITEM_HEIGHT_PX = 400
 /** WebView 之前固定垫高的 `Spacer(64.dp)`。 */
 private const val TOP_BAR_SPACER_DP = 64
 
+/** 恢复落位后等待布局稳定的时间，再按同一锚点校正一次。 */
+private const val RESTORE_CORRECTION_DELAY_MS = 320L
+
+/**
+ * 恢复「首次落位」时等图片的上限。
+ *
+ * 不设成完整超时（2s）是有意的：正文无图或图片已缓存时 [awaitImagesLoaded] 会立即返回，
+ * 只有真正有未加载图片的长文才会多等最多这么多时间；残余漂移由二次校正兜住。
+ */
+private const val RESTORE_FIRST_PASS_IMAGE_WAIT_MS = 600L
+
+/** `awaitResolver` 的轮询间隔与总超时。 */
+private const val RESOLVER_POLL_MS = 32L
+private const val RESOLVER_READY_TIMEOUT_MS = 2500L
+
+/** 恢复前等待「滚动范围可用」的上限（WebView 完成测量前 `maxValue` 为 0）。 */
+private const val LAYOUT_READY_TIMEOUT_MS = 600L
+
 /**
  * 承载两条渲染路径定位状态的桥。
  *
@@ -128,6 +149,19 @@ class ReaderAnchorBridge {
             ReadingRendererPreference.NativeComponent ->
                 listState?.let { LazyListAnchorResolver(it, this) }
         }
+
+    /**
+     * 等解析器就绪。
+     *
+     * 内容落地（`ReaderState.Loading` → 正文）与滚动容器挂载、WebView 实例注入之间隔着若干帧，
+     * 「阅读位置恢复」必须等到这些前置条件齐备，否则会静默不做任何事。
+     * 超时返回 null，由调用方放弃本次恢复（不阻塞阅读）。
+     */
+    suspend fun awaitResolver(timeoutMillis: Long = RESOLVER_READY_TIMEOUT_MS): AnchorResolver? =
+        withTimeoutOrNull(timeoutMillis) {
+            while (resolver() == null) delay(RESOLVER_POLL_MS)
+            resolver()
+        }
 }
 
 /**
@@ -135,6 +169,9 @@ class ReaderAnchorBridge {
  *
  * 坐标换算：`scrollState` 的坐标系包含 WebView 之前的 `Spacer(64.dp)` 与动态高度的 headline，
  * 所以目标偏移 = 64dp + headline 实测高度 + 元素在文档内的偏移。
+ *
+ * 单位：查询桥（`WebViewAnchorBridge`）已经把 JS 的 CSS px **换算成物理 px**，
+ * 这里的三项才可以直接相加（漏掉这一步会让跳转整体偏早，且偏移量越大错得越多）。
  */
 private class WebViewAnchorResolver(
     private val webView: WebView,
@@ -175,6 +212,26 @@ private class WebViewAnchorResolver(
     }
 
     override suspend fun restore(anchor: Anchor) {
+        // 内容刚上屏时 WebView 还没完成测量，`maxValue` 仍是 0 → 目标会被 clamp 到 0（落回顶部）。
+        // 先等滚动范围可用（通常一两帧），再等图片、再落位。
+        withTimeoutOrNull(LAYOUT_READY_TIMEOUT_MS) {
+            while (scrollState.maxValue <= 0) delay(RESOLVER_POLL_MS)
+        }
+        // 首次落位：图片最多只等 600ms（无图 / 已缓存时立即返回），避免长文开篇被长时间卡住。
+        webView.awaitImagesLoaded(RESTORE_FIRST_PASS_IMAGE_WAIT_MS)
+        applyRestore(anchor)
+        // 二次校正：等图片真正加载完，再按同一锚点重算一次（图片是异步撑高的，
+        // 这正是「恢复到 5000px，但上方还有 3 张未加载的图」这类漂移的解药）。
+        // 幂等（每次都从 anchor.offset 出发，不做增量累加）；用户已开始滚动则不打扰。
+        if (anchor.id.isNotBlank()) {
+            delay(RESTORE_CORRECTION_DELAY_MS)
+            webView.awaitImagesLoaded()
+            if (!scrollState.isScrollInProgress) applyRestore(anchor)
+        }
+    }
+
+    /** 按锚点算出目标偏移并滚动。 */
+    private suspend fun applyRestore(anchor: Anchor) {
         val max = scrollState.maxValue
         var target = anchor.offset
         // 补偿图片加载：锚点现在的位置相对捕获时刻的位移，直接加到原偏移上
@@ -238,8 +295,11 @@ private class LazyListAnchorResolver(
         val index =
             if (anchor.itemIndex >= 0) anchor.itemIndex
             else bridge.anchorIndices[anchor.id] ?: return
-        val lastIndex = (listState.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)
-        listState.scrollToItem(index.coerceIn(0, lastIndex), anchor.offset.coerceAtLeast(0))
+        // 内容刚上屏时 totalItemsCount 可能还是 0，此时**不能**把目标 clamp 成 0（会落回顶部）；
+        // 未布局时直接交给 LazyListState，它会把目标项作为首个可见项来测量。
+        val total = listState.layoutInfo.totalItemsCount
+        val target = if (total > 0) index.coerceIn(0, total - 1) else index
+        listState.scrollToItem(target, anchor.offset.coerceAtLeast(0))
     }
 
     private suspend fun jumpToItem(index: Int) {

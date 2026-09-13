@@ -106,6 +106,7 @@ class SettingsProvider @Inject constructor(
             // Reading page
             LocalReadingRenderer provides settings.readingRenderer,
             LocalReadingBoldCharacters provides settings.readingBoldCharacters,
+            LocalReadingRememberPosition provides settings.readingRememberPosition,
             LocalReadingTheme provides settings.readingTheme,
             LocalReadingPageTonalElevation provides settings.readingPageTonalElevation,
             LocalReadingAutoHideToolbar provides settings.readingAutoHideToolbar,

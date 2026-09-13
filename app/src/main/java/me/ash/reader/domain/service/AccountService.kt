@@ -23,6 +23,7 @@ import me.ash.reader.domain.repository.AccountDao
 import me.ash.reader.domain.repository.ArticleDao
 import me.ash.reader.domain.repository.FeedDao
 import me.ash.reader.domain.repository.GroupDao
+import me.ash.reader.domain.repository.ReadingPositionDao
 import me.ash.reader.infrastructure.di.ApplicationScope
 import me.ash.reader.infrastructure.preference.SettingsProvider
 import me.ash.reader.ui.ext.DataStoreKey
@@ -40,6 +41,7 @@ constructor(
     private val groupDao: GroupDao,
     private val feedDao: FeedDao,
     private val articleDao: ArticleDao,
+    private val readingPositionDao: ReadingPositionDao,
     @ApplicationScope private val coroutineScope: CoroutineScope,
     settingsProvider: SettingsProvider,
 ) {
@@ -139,6 +141,8 @@ constructor(
         }
         accountDao.queryById(accountId)?.let {
             articleDao.deleteByAccountId(accountId)
+            // reading_position 刻意不带外键（见 ReadingPosition 的 KDoc），删除账户时须显式清理
+            readingPositionDao.deleteByAccountId(accountId)
             feedDao.deleteByAccountId(accountId)
             groupDao.deleteByAccountId(accountId)
             accountDao.delete(it)

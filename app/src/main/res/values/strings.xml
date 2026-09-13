@@ -389,6 +389,8 @@
     <string name="enable">Enable</string>
     <string name="disable">Disable</string>
     <string name="toc">Table of contents</string>
+    <string name="remember_reading_position">Remember reading position</string>
+    <string name="remember_reading_position_desc">Reopen an article and jump back to where you left off.</string>
     <string name="back_to_reading">Back to reading</string>
     <string name="back_to_reading_label">Back to “%1$s”</string>
     <string name="reading_returned">Returned to reading position</string>
