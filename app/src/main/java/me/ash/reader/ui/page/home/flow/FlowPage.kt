@@ -266,10 +266,27 @@ fun FlowPage(
 
     var pagingItems: LazyPagingItems<ArticleFlowItem>? by remember { mutableStateOf(null) }
 
+    /**
+     * 本次进入阅读页时，用户在列表里**点开**的那篇文章。
+     *
+     * 用来区分两件事：
+     * 1. 「读完刚点的那篇 → 返回」：列表必须保持原样；
+     * 2. 「一路读到了后面的文章 → 返回」：需要把当前文章带回视野。
+     *
+     * 之所以要区分，是因为列表位置本来就不会丢：List pane 在进入阅读页时被销毁，
+     * 其 `rememberSaveable` 状态由 `AnimatedPane` 的
+     * `saveableStateHolder.SaveableStateProvider(paneRole)` 存档并在返回时原样还原。
+     * 返回时对列表做的任何「重新定位」都会把用户刚看的条目从原位置挪走。
+     */
+    var enteredFromListArticleId by rememberSaveable { mutableStateOf("") }
+
     if (isTwoPane) {
         LaunchedEffect(readerState) {
             if (readerState.articleId != null) {
                 val articleId = readerState.articleId
+
+                // 就是列表里点开的那一篇 → 不要动列表（双栏下列表本就一直可见）
+                if (articleId == enteredFromListArticleId) return@LaunchedEffect
 
                 val itemList = pagingItems?.itemSnapshotList
 
@@ -297,6 +314,13 @@ fun FlowPage(
                     } ?: -1
 
                 if (index != -1) {
+                    // ⚠ 只有当「当前文章已不是在列表里点开的那一篇」时才重新定位。
+                    // 位置已由 SaveableStateHolder 还原，此处若无条件重定位，
+                    // 刚读完的那条会从用户离开时的位置（例如屏幕中央）被挪到视口顶部附近
+                    // —— scrollOffset 是**物理 px**，且负值表示条目落在视口顶部之下，
+                    // 传 -400 就等于「把它放到距顶部约 145dp 处」。
+                    if (articleId == enteredFromListArticleId) return@LaunchedEffect
+
                     snapAppBarToCollapsed()
                     listState.requestScrollToItem(index, scrollOffset = -400)
                 }
@@ -684,6 +708,8 @@ fun FlowPage(
                                             openLinkSpecificBrowser,
                                         )
                                     } else {
+                                        // 记下「从列表点开的是哪一篇」，返回时据此决定要不要重定位
+                                        enteredFromListArticleId = articleWithFeed.article.id
                                         navigateToArticle(articleWithFeed.article.id, index)
                                     }
                                 },
