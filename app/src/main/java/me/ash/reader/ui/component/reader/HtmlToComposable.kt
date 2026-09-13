@@ -25,6 +25,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyItemScope
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -60,6 +61,82 @@ import org.jsoup.nodes.Element
 import org.jsoup.nodes.Node
 import org.jsoup.nodes.TextNode
 
+/**
+ * 原生渲染路径的锚点收集器。
+ *
+ * `TextComposer` 会把连续的行内文本合并进同一个 `item {}`，只有调用
+ * `terminateCurrentText()` 的地方才切分，所以「锚点 → LazyColumn 项序号」不能靠 HTML 元素
+ * 序号推算，只能在 item 注册时同步计数。
+ *
+ * 当且仅当调用方传入 [LazyListScope] 的实现（即「这篇文章有目录」）时才会生效——没有目录的
+ * 文章 item 的产出顺序与数量完全不变量。
+ */
+internal class AnchorCollector(private val sink: (id: String, itemIndex: Int) -> Unit) {
+
+    private var itemCount: Int = 0
+
+    fun onItem() {
+        itemCount += 1
+    }
+
+    /** 刚注册完的那个 item 即锚点所在项。 */
+    fun bind(anchorId: String) {
+        if (anchorId.isNotBlank()) sink(anchorId, itemCount - 1)
+    }
+}
+
+internal interface AnchorAwareLazyListScope : LazyListScope {
+    val anchorCollector: AnchorCollector
+}
+
+internal fun LazyListScope.anchorCollectorOrNull(): AnchorCollector? =
+    (this as? AnchorAwareLazyListScope)?.anchorCollector
+
+private class CountingLazyListScope(
+    private val delegate: LazyListScope,
+    override val anchorCollector: AnchorCollector,
+) : AnchorAwareLazyListScope {
+
+    override fun item(
+        key: Any?,
+        contentType: Any?,
+        content: @Composable LazyItemScope.() -> Unit,
+    ) {
+        anchorCollector.onItem()
+        delegate.item(key, contentType, content)
+    }
+
+    override fun items(
+        count: Int,
+        key: ((Int) -> Any)?,
+        contentType: (Int) -> Any?,
+        itemContent: @Composable LazyItemScope.(Int) -> Unit,
+    ) {
+        anchorCollector.onItem()
+        delegate.items(count, key, contentType, itemContent)
+    }
+}
+
+/**
+ * 标题前切一刀：让正文（含前一段）先落成一个 item，标题自己独占下一个 item。
+ * 只在启用锚点时生效。
+ */
+private fun TextComposer.beginAnchorSplit(lazyListScope: LazyListScope) {
+    if (lazyListScope.anchorCollectorOrNull() == null) return
+    terminateCurrentText()
+    append("\n")
+}
+
+/**
+ * 标题后切一刀：把标题 flush 成独立 item 并登记锚点，再补一个换行以保留原有的段间距。
+ */
+private fun TextComposer.endAnchorSplit(lazyListScope: LazyListScope, anchorId: String) {
+    val collector = lazyListScope.anchorCollectorOrNull() ?: return
+    terminateCurrentText()
+    collector.bind(anchorId)
+    append("\n")
+}
+
 fun LazyListScope.htmlFormattedText(
     inputStream: InputStream,
     subheadUpperCase: Boolean = false,
@@ -67,6 +144,11 @@ fun LazyListScope.htmlFormattedText(
     @DrawableRes imagePlaceholder: Int,
     onImageClick: ((imgUrl: String, altText: String) -> Unit)? = null,
     onLinkClick: (String) -> Unit,
+    /**
+     * 新增：锚点回调。参数为「锚点 id」与「该锚点在本次 LazyListScope 内的项序号（从 0 起）」。
+     * 默认 null = no-op，且不改变 item 的产出顺序与数量。
+     */
+    anchorSink: ((id: String, itemIndex: Int) -> Unit)? = null,
 ) {
     Jsoup.parse(inputStream, null, baseUrl)?.body()?.let { body ->
         formatBody(
@@ -76,6 +158,7 @@ fun LazyListScope.htmlFormattedText(
             onImageClick = onImageClick,
             onLinkClick = onLinkClick,
             baseUrl = baseUrl,
+            anchorSink = anchorSink,
         )
     }
 }
@@ -88,9 +171,15 @@ private fun LazyListScope.formatBody(
     onImageClick: ((imgUrl: String, altText: String) -> Unit)? = null,
     onLinkClick: (String) -> Unit,
     baseUrl: String,
+    anchorSink: ((id: String, itemIndex: Int) -> Unit)? = null,
 ) {
+    // 只在需要锚点时包一层计数 scope：没目录的文章走原路径，行为与改动前一致。
+    val scope: LazyListScope =
+        if (anchorSink == null) this
+        else CountingLazyListScope(this, AnchorCollector(anchorSink))
+
     val composer = TextComposer { paragraphBuilder ->
-        item {
+        scope.item {
             val textLinkStyles = textLinkStyles()
             val paragraph =
                 paragraphBuilder.toAnnotatedString().mapAnnotations {
@@ -124,7 +213,7 @@ private fun LazyListScope.formatBody(
     composer.appendTextChildren(
         element.childNodes(),
         subheadUpperCase = subheadUpperCase,
-        lazyListScope = this,
+        lazyListScope = scope,
         imagePlaceholder = imagePlaceholder,
         onImageClick = onImageClick,
         onLinkClick = onLinkClick,
@@ -245,6 +334,7 @@ private fun TextComposer.appendTextChildren(
 
                     "br" -> append('\n')
                     "h1" -> {
+                        beginAnchorSplit(lazyListScope)
                         withParagraph {
                             withComposableStyle(style = { h1Style() }) {
                                 append(
@@ -255,9 +345,11 @@ private fun TextComposer.appendTextChildren(
                                 )
                             }
                         }
+                        endAnchorSplit(lazyListScope, element.id())
                     }
 
                     "h2" -> {
+                        beginAnchorSplit(lazyListScope)
                         withParagraph {
                             withComposableStyle(style = { h2Style() }) {
                                 append(
@@ -268,9 +360,11 @@ private fun TextComposer.appendTextChildren(
                                 )
                             }
                         }
+                        endAnchorSplit(lazyListScope, element.id())
                     }
 
                     "h3" -> {
+                        beginAnchorSplit(lazyListScope)
                         withParagraph {
                             withComposableStyle(style = { h3Style() }) {
                                 append(
@@ -281,9 +375,11 @@ private fun TextComposer.appendTextChildren(
                                 )
                             }
                         }
+                        endAnchorSplit(lazyListScope, element.id())
                     }
 
                     "h4" -> {
+                        beginAnchorSplit(lazyListScope)
                         withParagraph {
                             withComposableStyle(style = { h4Style() }) {
                                 append(
@@ -294,9 +390,11 @@ private fun TextComposer.appendTextChildren(
                                 )
                             }
                         }
+                        endAnchorSplit(lazyListScope, element.id())
                     }
 
                     "h5" -> {
+                        beginAnchorSplit(lazyListScope)
                         withParagraph {
                             withComposableStyle(style = { h5Style() }) {
                                 append(
@@ -307,9 +405,11 @@ private fun TextComposer.appendTextChildren(
                                 )
                             }
                         }
+                        endAnchorSplit(lazyListScope, element.id())
                     }
 
                     "h6" -> {
+                        beginAnchorSplit(lazyListScope)
                         withParagraph {
                             withComposableStyle(style = { h6Style() }) {
                                 append(
@@ -320,6 +420,7 @@ private fun TextComposer.appendTextChildren(
                                 )
                             }
                         }
+                        endAnchorSplit(lazyListScope, element.id())
                     }
 
                     "strong",

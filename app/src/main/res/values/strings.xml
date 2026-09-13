@@ -388,4 +388,8 @@
     <string name="parse_full_content_desc">Fetch full articles from webpages</string>
     <string name="enable">Enable</string>
     <string name="disable">Disable</string>
+    <string name="toc">Table of contents</string>
+    <string name="back_to_reading">Back to reading</string>
+    <string name="back_to_reading_label">Back to “%1$s”</string>
+    <string name="reading_returned">Returned to reading position</string>
 </resources>

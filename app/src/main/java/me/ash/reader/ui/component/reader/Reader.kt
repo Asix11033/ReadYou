@@ -32,7 +32,9 @@ fun LazyListScope.Reader(
     link: String,
     content: String,
     onImageClick: ((imgUrl: String, altText: String) -> Unit)? = null,
-    onLinkClick: (String) -> Unit
+    onLinkClick: (String) -> Unit,
+    /** 透传给 [htmlFormattedText] 的锚点回调；默认 null = no-op。 */
+    anchorSink: ((id: String, itemIndex: Int) -> Unit)? = null,
 ) {
 //    Log.i("RLog", "Reader: ")
     htmlFormattedText(
@@ -41,6 +43,7 @@ fun LazyListScope.Reader(
         baseUrl = link,
         onImageClick = onImageClick,
         imagePlaceholder = R.drawable.ic_launcher_foreground,
-        onLinkClick = onLinkClick
+        onLinkClick = onLinkClick,
+        anchorSink = anchorSink,
     )
 }

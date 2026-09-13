@@ -352,4 +352,8 @@
     <string name="parse_full_content_desc">从网页获取完整内容</string>
     <string name="enable">启用</string>
     <string name="disable">停用</string>
+    <string name="toc">目录</string>
+    <string name="back_to_reading">返回阅读处</string>
+    <string name="back_to_reading_label">返回「%1$s」</string>
+    <string name="reading_returned">已返回阅读处</string>
 </resources>

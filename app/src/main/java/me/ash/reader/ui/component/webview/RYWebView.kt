@@ -1,6 +1,7 @@
 package me.ash.reader.ui.component.webview
 
 import android.util.Log
+import android.webkit.WebView
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -40,6 +41,8 @@ fun RYWebView(
     content: String,
     refererDomain: String? = null,
     onImageClick: ((imgUrl: String, altText: String) -> Unit)? = null,
+    /** 新增：把内部持有的 WebView 暴露给调用方，用于锚点查询。默认 null，不影响既有调用。 */
+    onWebViewReady: ((WebView) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val maxWidth = LocalConfiguration.current.screenWidthDp.dp.value
@@ -94,6 +97,9 @@ fun RYWebView(
         else if (readingFonts is ReadingFontsPreference.GoogleSans) {
             "/android_res/font/google_sans_flex.ttf"
         } else null
+
+    // 把 WebView 引用交给调用方（锚点查询用）。回调只写普通字段，重复调用无副作用。
+    onWebViewReady?.invoke(webView)
 
     AndroidView(
         modifier = modifier,

@@ -53,12 +53,17 @@ fun BottomBar(
     isFullContent: Boolean,
     isBoldCharacters: Boolean,
     ttsButton: @Composable () -> Unit,
+    /** 目录入口：仅当解析出 ≥ 2 个目录项时才显示。 */
+    isTocAvailable: Boolean = false,
+    /** 底部胶囊（「返回阅读处」）等内容，与 BottomBar 同一套显隐动画。 */
+    leadingContent: (@Composable () -> Unit)? = null,
     onUnread: (isUnread: Boolean) -> Unit = {},
     onStarred: (isStarred: Boolean) -> Unit = {},
     onNextArticle: () -> Unit = {},
     onFullContent: (isFullContent: Boolean) -> Unit = {},
     onBoldCharacters: () -> Unit = {},
     onReadAloud: () -> Unit = {},
+    onToc: () -> Unit = {},
 ) {
     val tonalElevation = LocalReadingPageTonalElevation.current
     val isOutlined = tonalElevation == ReadingPageTonalElevationPreference.Outlined
@@ -77,6 +82,15 @@ fun BottomBar(
         ) {
             val view = LocalView.current
             Column {
+                // 「返回阅读处」胶囊：与 BottomBar 共用同一套显隐动画，不做独立常驻
+                leadingContent?.let { chip ->
+                    Box(
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        chip()
+                    }
+                }
                 if (isOutlined) {
                     HorizontalDivider(
                         color = MaterialTheme.colorScheme.surfaceContainerHighest,
@@ -95,6 +109,18 @@ fun BottomBar(
                         horizontalArrangement = Arrangement.SpaceAround,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
+                        if (isTocAvailable) {
+                            CanBeDisabledIconButton(
+                                modifier = Modifier.size(40.dp),
+                                disabled = false,
+                                imageVector = Icons.AutoMirrored.Rounded.Subject,
+                                contentDescription = stringResource(R.string.toc),
+                                tint = MaterialTheme.colorScheme.outline,
+                            ) {
+                                view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                                onToc()
+                            }
+                        }
                         CanBeDisabledIconButton(
                             modifier = Modifier.size(40.dp),
                             disabled = false,
