@@ -55,6 +55,14 @@ interface AnchorResolver {
     suspend fun scrollTo(id: String)
 
     /**
+     * 回到文章顶部。
+     *
+     * 与 [scrollTo] 共用同一套阈值化跳转，避免长文「十几屏的高速滚动动画」；
+     * 由顶栏点击触发，调用方负责同时清空返回点。
+     */
+    suspend fun scrollToTop()
+
+    /**
      * 捕获当前位置为返回点/阅读位置。
      *
      * 声明为 `suspend` 是因为 WebView 路径需要用 JS 反查「当前视口顶部之上最近的锚点」以
