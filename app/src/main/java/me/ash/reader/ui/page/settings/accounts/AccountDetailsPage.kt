@@ -87,13 +87,8 @@ fun AccountDetailsPage(
 
     var nameValue by remember { mutableStateOf(selectedAccount?.name) }
     var nameDialogVisible by remember { mutableStateOf(false) }
-    var blockListValue by remember {
-        mutableStateOf(
-            SyncBlockListPreference.toString(
-                selectedAccount?.syncBlockList ?: SyncBlockListPreference.default
-            )
-        )
-    }
+    // 只在「打开弹窗」那一刻从数据库回读并写入这里，弹窗内的编辑状态由 TextFieldState 自己持有。
+    var blockListValue by remember { mutableStateOf("") }
     var blockListDialogVisible by remember { mutableStateOf(false) }
     var syncIntervalDialogVisible by remember { mutableStateOf(false) }
     var keepArchivedDialogVisible by remember { mutableStateOf(false) }
@@ -328,23 +323,34 @@ fun AccountDetailsPage(
         keepArchivedDialogVisible = false
     }
 
-    TextFieldDialog(
-        visible = blockListDialogVisible,
-        title = stringResource(R.string.block_list),
-        value = blockListValue,
-        singleLine = false,
-        onValueChange = { blockListValue = it },
-        onDismissRequest = { blockListDialogVisible = false },
-        onConfirm = {
-            selectedAccount?.let { account ->
-                val blockList = SyncBlockListPreference.of(blockListValue)
-                blockListDialogVisible = false
-                viewModel.applyBlockList(account, blockList) { removed ->
-                    context.showToast(context.getString(R.string.block_list_toast, removed))
+    // ⚠️ 必须包在 `if (blockListDialogVisible)` 内，不能只靠 `visible` 参数控制。
+    //
+    // `TextFieldDialog` 内部是 `rememberTextFieldState(value)`：它**只在首次组合时**读取初始
+    // 文本，之后 `value` 再怎么变都不会同步进输入框。若本组件常驻组合，那么它在页面刚进入时
+    // （`selectedAccount` 尚为 null）就以空串初始化了一次，此后 `onClick` 里回读到的已保存
+    // 关键词写进了 `blockListValue`，却传不进输入框 —— 表现为「保存成功、重启后再打开弹窗
+    // 依然是空的」，看起来像数据没保存（实际已写库）。
+    //
+    // 包进 `if` 之后，每次打开弹窗都会重新组合该 Dialog，用最新的 `blockListValue` 初始化。
+    if (blockListDialogVisible) {
+        TextFieldDialog(
+            visible = true,
+            title = stringResource(R.string.block_list),
+            value = blockListValue,
+            singleLine = false,
+            onValueChange = { blockListValue = it },
+            onDismissRequest = { blockListDialogVisible = false },
+            onConfirm = {
+                selectedAccount?.let { account ->
+                    val blockList = SyncBlockListPreference.of(blockListValue)
+                    blockListDialogVisible = false
+                    viewModel.applyBlockList(account, blockList) { removed ->
+                        context.showToast(context.getString(R.string.block_list_toast, removed))
+                    }
                 }
-            }
-        },
-    )
+            },
+        )
+    }
 
     RYDialog(
         visible = uiState.clearDialogVisible,

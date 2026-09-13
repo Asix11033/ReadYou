@@ -108,7 +108,11 @@ constructor(
                 .awaitAll()
 
             Timber.tag("RlOG").i("onCompletion: ${System.currentTimeMillis() - preTime}")
-            accountService.update(currentAccount.copy(updateAt = Date()))
+            // 用 accountId 从库里重读后再改，不要把本次同步开始时读到的 `currentAccount`
+            // 快照整体回写：同步要抓取多个 feed、耗时可达数秒到数十秒，期间用户完全可能刚
+            // 保存过账户设置（如屏蔽列表），旧快照回写会把这些改动覆盖回旧值。
+            // （`currentAccount.syncBlockList` 仍用于上面的过滤，那是本次同步应有的语义。）
+            accountService.update(accountId) { copy(updateAt = Date()) }
             ListenableWorker.Result.success()
         }
             .onFailure { syncLogger.log(it) }

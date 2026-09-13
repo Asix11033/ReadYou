@@ -102,10 +102,14 @@ class AccountViewModel @Inject constructor(
     /**
      * Persists [blockList] on [account] and immediately removes the already stored articles
      * that match it. [callback] receives the number of removed articles on the main thread.
+     *
+     * Uses [applicationScope] rather than `viewModelScope` (same as [update]): the user usually
+     * leaves the page right after confirming, which would cancel a `viewModelScope` job before
+     * the write has been flushed to the database.
      */
     fun applyBlockList(account: Account, blockList: SyncBlockList, callback: (Int) -> Unit = {}) {
         val accountId = account.id ?: return
-        viewModelScope.launch(ioDispatcher) {
+        applicationScope.launch(ioDispatcher) {
             accountService.update(accountId) { copy(syncBlockList = blockList) }
             val removed = rssService.get(account.type.id).applyBlockList(accountId, blockList)
             withContext(mainDispatcher) { callback(removed) }
