@@ -514,7 +514,9 @@ constructor(
                 .filter { it.id !in remoteFeeds.await().map { feed -> feed.id } }
                 .forEach { super.deleteFeed(it, true) }
 
-            accountService.update(account.copy(updateAt = Date()))
+            // 不要整行回写同步开始时的 `account` 快照：同步耗时可达数十秒，期间用户保存的
+            // 账户设置（如屏蔽列表）会被覆盖回旧值。按 id 重读后再改（同 LocalRssService）。
+            accountService.update(accountId) { copy(updateAt = Date()) }
             ListenableWorker.Result.success()
         } catch (e: Exception) {
             Timber.tag("RLog").e(e, "On sync exception: ${e.message}")

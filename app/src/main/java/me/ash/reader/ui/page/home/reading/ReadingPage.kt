@@ -28,6 +28,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -75,6 +76,15 @@ private const val POSITION_CAPTURE_DEBOUNCE_MS = 800L
 
 /** 像素偏移小于该值时视为「仍在顶部」，不写位置记录。 */
 private const val POSITION_AT_TOP_PX = 8
+
+/**
+ * 程序化滚动结束后的一段时间内，去抖捕获一律丢弃。
+ *
+ * 必须存在的原因：去抖发射恒晚于「最后一次滚动变化 + 800ms」，而 `scrollIntent` 在滚动
+ * 结束瞬间就复位为 `Idle` —— collect 里只查标志位永远拦不住「程序化滚动的回声」，
+ * 目录跳转的落点会因此被写进阅读位置记忆（甚至 ratio > 0.98 时把进度清掉）。
+ */
+private const val PROGRAMMATIC_SUPPRESS_WINDOW_MS = POSITION_CAPTURE_DEBOUNCE_MS + 500L
 
 /** 当前渲染器对应的位置记录模式。 */
 private fun ReadingRendererPreference.positionMode(): Int =
@@ -177,6 +187,9 @@ fun ReadingPage(
     /** 滚动意图：程序化滚动窗口内不写入阅读位置记忆（P4 的唯一消费者）。 */
     var scrollIntent by remember { mutableStateOf(ScrollIntent.Idle) }
 
+    /** 最近一次程序化滚动的结束时刻；去抖捕获按 [PROGRAMMATIC_SUPPRESS_WINDOW_MS] 排除回声。 */
+    var lastProgrammaticScrollEndAt by remember { mutableLongStateOf(0L) }
+
     /**
      * 「本篇已做过位置恢复」标记。
      *
@@ -207,8 +220,12 @@ fun ReadingPage(
                 scrollIntent = ScrollIntent.Idle
             }
         }
-        // 取消路径也要复位，否则标志位会永久为 true（极难排查的静默失效）
-        job.invokeOnCompletion { scrollIntent = ScrollIntent.Idle }
+        // 取消路径也要复位，否则标志位会永久为 true（极难排查的静默失效）；
+        // 同时记录结束时刻，供去抖捕获按时间窗排除本次滚动的回声
+        job.invokeOnCompletion {
+            scrollIntent = ScrollIntent.Idle
+            lastProgrammaticScrollEndAt = System.currentTimeMillis()
+        }
         return job
     }
 
@@ -405,6 +422,15 @@ fun ReadingPage(
                                             // 程序化滚动窗口内不写记忆：否则「目录跳到生词表 →
                                             // 退出 → 重开」会直接落在生词表
                                             if (scrollIntent != ScrollIntent.Idle) return@collect
+                                            // 标志位拦不住回声：去抖发射恒晚于复位（见常量注释），
+                                            // 必须再按时间窗排除程序化滚动刚结束后的那次捕获
+                                            if (
+                                                System.currentTimeMillis() -
+                                                    lastProgrammaticScrollEndAt <
+                                                    PROGRAMMATIC_SUPPRESS_WINDOW_MS
+                                            ) {
+                                                return@collect
+                                            }
                                             val anchor =
                                                 anchorBridge.resolver()?.captureCurrent()
                                                     ?: return@collect

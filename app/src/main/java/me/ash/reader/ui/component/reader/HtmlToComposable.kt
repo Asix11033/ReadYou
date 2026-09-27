@@ -75,8 +75,11 @@ internal class AnchorCollector(private val sink: (id: String, itemIndex: Int) ->
 
     private var itemCount: Int = 0
 
-    fun onItem() {
-        itemCount += 1
+    fun onItem() = onItems(1)
+
+    /** `items(count = N)` 一次注册 N 项，计数必须同步加 N，否则后续锚点索引整体漂移。 */
+    fun onItems(count: Int) {
+        itemCount += count
     }
 
     /** 刚注册完的那个 item 即锚点所在项。 */
@@ -112,7 +115,7 @@ private class CountingLazyListScope(
         contentType: (Int) -> Any?,
         itemContent: @Composable LazyItemScope.(Int) -> Unit,
     ) {
-        anchorCollector.onItem()
+        anchorCollector.onItems(count)
         delegate.items(count, key, contentType, itemContent)
     }
 }

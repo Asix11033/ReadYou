@@ -292,12 +292,20 @@ private class LazyListAnchorResolver(
     }
 
     override suspend fun restore(anchor: Anchor) {
+        val total = listState.layoutInfo.totalItemsCount
         val index =
-            if (anchor.itemIndex >= 0) anchor.itemIndex
-            else bridge.anchorIndices[anchor.id] ?: return
+            when {
+                anchor.itemIndex >= 0 -> anchor.itemIndex
+                bridge.anchorIndices.containsKey(anchor.id) ->
+                    bridge.anchorIndices.getValue(anchor.id)
+                // 换过渲染器时像素与项序号互不可用：按比例估算落点（与 WebView 路径的
+                // ratio 兜底对齐），没有目录锚点的文章也能恢复个大概
+                anchor.ratio > 0f && total > 0 ->
+                    (anchor.ratio * total).roundToInt().coerceIn(0, total - 1)
+                else -> return
+            }
         // 内容刚上屏时 totalItemsCount 可能还是 0，此时**不能**把目标 clamp 成 0（会落回顶部）；
         // 未布局时直接交给 LazyListState，它会把目标项作为首个可见项来测量。
-        val total = listState.layoutInfo.totalItemsCount
         val target = if (total > 0) index.coerceIn(0, total - 1) else index
         listState.scrollToItem(target, anchor.offset.coerceAtLeast(0))
     }

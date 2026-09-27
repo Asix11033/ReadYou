@@ -164,8 +164,9 @@ fun Content(
                         state = listState,
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        // 重建锚点索引表（每次构建 item 列表都会重新跑一遍，保证与 item 一一对应）
-                        if (tocAvailable) bridge?.anchorIndices?.clear()
+                        // 重建锚点索引表（每次构建 item 列表都会重新跑一遍，保证与 item 一一对应）。
+                        // 恒清、不以 tocAvailable 为条件：本篇无目录时也要清掉上一篇的残留条目。
+                        bridge?.anchorIndices?.clear()
 
                         item {
                             // Top bar height

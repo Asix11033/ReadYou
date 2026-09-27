@@ -433,10 +433,12 @@ interface ArticleDao {
     @Query(
         """
         SELECT * FROM article
-        WHERE accountId = :accountId
+        WHERE accountId = :accountId AND id > :lastId
+        ORDER BY id
+        LIMIT :limit
         """
     )
-    suspend fun queryAllByAccountId(accountId: Int): List<Article>
+    suspend fun queryByAccountIdAfter(accountId: Int, lastId: String, limit: Int): List<Article>
 
 
     @Transaction

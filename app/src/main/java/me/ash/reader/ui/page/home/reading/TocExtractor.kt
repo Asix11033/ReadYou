@@ -96,7 +96,8 @@ object TocExtractor {
         val separatorIndex = elements.indexOfFirst { it.tagName() == "hr" }
         val overviewLabel = findOverviewLabel(body)
         // 骨架信号：只有「背景导读容器 / 精读笔记标签」这类双语源特征出现时，才允许把正文
-        // `<p>` 升级成标题。第三方源一律只读不写 —— 真标题照样进目录，但绝不改写 DOM。
+        // `<p>` 升级成标题。第三方源不碰标签结构 —— 真标题照样进目录，但只做「补 id」
+        // 这一种最小 DOM 改动（不补 id 锚点无法定位），绝不升级/降级标签。
         val hasSkeleton =
             overviewLabel != null ||
                 body.select("p").any {

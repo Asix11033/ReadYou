@@ -32,6 +32,9 @@ import me.ash.reader.infrastructure.rss.RssHelper
 import me.ash.reader.ui.ext.decodeHTML
 import me.ash.reader.ui.ext.spacerDollar
 
+/** Page size for the cursor-paged scan in [AbstractRssRepository.applyBlockList]. */
+private const val BLOCK_LIST_PAGE_SIZE = 500
+
 abstract class AbstractRssRepository(
     private val articleDao: ArticleDao,
     private val groupDao: GroupDao,
@@ -396,13 +399,26 @@ abstract class AbstractRssRepository(
      * The matching is done in Kotlin with the very same [shouldBlock] used at sync time, so
      * the result is guaranteed to be consistent with newly fetched articles, and no user
      * input ever reaches SQL.
+     *
+     * Paged by a primary-key cursor rather than loading the whole table: a local account can
+     * hold tens of thousands of articles, and an OFFSET-based scan would skip rows as soon as
+     * earlier pages are deleted. The cursor (`id > lastId`) is immune to deletions.
      */
     suspend fun applyBlockList(accountId: Int, blockList: SyncBlockList): Int {
         if (blockList.isEmpty()) return 0
-        val blocked = articleDao.queryAllByAccountId(accountId).filter { blockList.shouldBlock(it.title) }
-        if (blocked.isEmpty()) return 0
-        articleDao.delete(*blocked.toTypedArray())
-        return blocked.size
+        var removed = 0
+        var lastId = ""
+        while (true) {
+            val page = articleDao.queryByAccountIdAfter(accountId, lastId, BLOCK_LIST_PAGE_SIZE)
+            if (page.isEmpty()) break
+            lastId = page.last().id
+            val blocked = page.filter { blockList.shouldBlock(it.title) }
+            if (blocked.isNotEmpty()) {
+                articleDao.delete(*blocked.toTypedArray())
+                removed += blocked.size
+            }
+        }
+        return removed
     }
 
     suspend fun groupParseFullContent(group: Group, isFullContent: Boolean) {

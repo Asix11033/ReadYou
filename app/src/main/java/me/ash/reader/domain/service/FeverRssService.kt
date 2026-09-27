@@ -311,15 +311,17 @@ constructor(
             }
 
             Log.i("RLog", "onCompletion: ${System.currentTimeMillis() - preTime}")
-            accountService.update(
-                account.copy(
+            // 不要整行回写同步开始时的 `account` 快照（会覆盖同步期间用户保存的账户设置）。
+            // 按 id 重读后再改；lastArticleId 的「无新文章时保留现值」分支用块内（重读后）的值。
+            accountService.update(accountId) {
+                copy(
                     updateAt = Date(),
                     lastArticleId =
                         if (lastSeenId.isNotEmpty()) {
                             accountId.spacerDollar(lastSeenId)
-                        } else account.lastArticleId,
+                        } else lastArticleId,
                 )
-            )
+            }
             ListenableWorker.Result.success()
         } catch (e: Exception) {
             Log.e("RLog", "On sync exception: ${e.message}", e)
