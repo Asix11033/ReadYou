@@ -37,6 +37,7 @@ import me.ash.reader.infrastructure.di.DefaultDispatcher
 import me.ash.reader.infrastructure.di.IODispatcher
 import me.ash.reader.infrastructure.preference.SettingsProvider
 import javax.inject.Inject
+import timber.log.Timber
 
 private const val TAG = "FeedsViewModel"
 
@@ -72,6 +73,12 @@ class FeedsViewModel @Inject constructor(
 
     fun sync() {
         applicationScope.launch(ioDispatcher) {
+            // Commit pending read status before the sync worker reads/writes articles.
+            runCatching { diffMapHolder.commitDiffs() }
+                .onFailure {
+                    Timber.e(it, "Failed to commit read status before sync")
+                    return@launch
+                }
             rssService.get().doSyncOneTime()
         }
     }

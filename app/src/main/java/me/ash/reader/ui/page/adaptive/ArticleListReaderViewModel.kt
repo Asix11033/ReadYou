@@ -216,18 +216,13 @@ constructor(
     }
 
     fun sync() {
-        diffMapHolder.commitDiffsToDb()
-        viewModelScope.launch {
-            _isSyncingFlow.value = true
-            val isSyncing = syncWorkerStatusFlow.value
-            if (!isSyncing) {
-                delay(1000L)
-                if (syncWorkerStatusFlow.value == false) {
-                    _isSyncingFlow.value = false
-                }
-            }
-        }
         applicationScope.launch(ioDispatcher) {
+            // Ensure local read status is persisted before the sync worker reads/writes articles.
+            runCatching { diffMapHolder.commitDiffs() }
+                .onFailure {
+                    Timber.e(it, "Failed to commit read status before sync")
+                    return@launch
+                }
             val filterState = filterStateUseCase.filterStateFlow.value
             val service = rssService.get()
             when (service) {
@@ -244,6 +239,16 @@ constructor(
                     )
 
                 else -> service.doSyncOneTime()
+            }
+        }
+        viewModelScope.launch {
+            _isSyncingFlow.value = true
+            val isSyncing = syncWorkerStatusFlow.value
+            if (!isSyncing) {
+                delay(1000L)
+                if (syncWorkerStatusFlow.value == false) {
+                    _isSyncingFlow.value = false
+                }
             }
         }
     }

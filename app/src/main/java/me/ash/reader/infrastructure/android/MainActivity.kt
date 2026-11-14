@@ -28,6 +28,7 @@ import java.lang.reflect.Field
 import javax.inject.Inject
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import me.ash.reader.domain.data.DiffMapHolder
 import me.ash.reader.domain.data.FilterStateUseCase
 import me.ash.reader.domain.service.AccountService
 import me.ash.reader.domain.service.WidgetUpdateWorker
@@ -59,6 +60,8 @@ class MainActivity : AppCompatActivity() {
     @Inject lateinit var workManager: WorkManager
 
     @Inject lateinit var filterUseCase: FilterStateUseCase
+
+    @Inject lateinit var diffMapHolder: DiffMapHolder
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -209,6 +212,12 @@ class MainActivity : AppCompatActivity() {
             addOnNewIntentListener(listener)
             onDispose { removeOnNewIntentListener(listener) }
         }
+    }
+
+    override fun onPause() {
+        // Persist scroll-marked read status while the process is still alive.
+        diffMapHolder.commitDiffsToDb()
+        super.onPause()
     }
 
     override fun onResume() {
